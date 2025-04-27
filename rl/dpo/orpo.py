@@ -2,8 +2,8 @@
 
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["WANDB_PROJECT"] = "dpo-qwen"  # optional: name your project
-os.environ["WANDB_NAME"] = "dpo-qwen-2.5-0.5b-instruct-run-9"  # set the specific run name
+os.environ["WANDB_PROJECT"] = "orpo-qwen"  # optional: name your project
+os.environ["WANDB_NAME"] = "orpo-qwen-2.5-1.5b-instruct-run-1"  # set the specific run name
 
 import torch
 import random
@@ -14,7 +14,7 @@ from datasets import load_dataset, Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 from transformers.generation.stopping_criteria import StoppingCriteria
 from peft import LoraConfig, get_peft_model, PeftModel
-from trl import DPOConfig, DPOTrainer
+from trl import ORPOConfig, ORPOTrainer
 
 @dataclass
 class Config:
@@ -34,7 +34,7 @@ class Config:
     epoch: int = 3
     lr: float = 1e-5
 
-    save_dir_name: str = "saved_models"
+    save_dir_name: str = "saved_models_orpo"
     merge_dir_name: str = "merged_model"
 
 def convert_data_to_qwen_format(query: str, tokenizer: AutoTokenizer, to_tokenize: bool=False):
@@ -226,7 +226,7 @@ def train(config: Config):
         print_trainable_parameters(peft_model)
     
     # ----- Training ----- #
-    training_arguments = DPOConfig(
+    training_arguments = ORPOConfig(
         output_dir=Path(__file__).absolute().parent / config.save_dir_name,
         eval_strategy="steps",
         beta=0.1,   # Higher β means less deviation from the reference model
@@ -246,7 +246,7 @@ def train(config: Config):
         report_to="wandb",
     )
     peft_model.config.use_cache = False
-    trainer = DPOTrainer(
+    trainer = ORPOTrainer(
         peft_model,
         args=training_arguments,
         train_dataset=train_dataset,
@@ -289,10 +289,10 @@ if __name__ == "__main__":
         enable_lora=True
     )
 
-    # train(config)
+    train(config)
 
-    # config.adapter_path = "/home/jiaxijzhang/llm_relevant_study/rl/dpo/saved_models/checkpoint-375"
-    # merge_lora_and_save(config.base_model_path, config.adapter_path, os.path.join(config.save_dir_name, config.merge_dir_name))
+    config.adapter_path = "/home/jiaxijzhang/llm_relevant_study/rl/dpo/saved_models/checkpoint-375"
+    merge_lora_and_save(config.base_model_path, config.adapter_path, os.path.join(config.save_dir_name, config.merge_dir_name))
 
     queries = [
     "程序员的悲哀是什么？",
