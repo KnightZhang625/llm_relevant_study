@@ -1,0 +1,54 @@
+# #  # Dataset # # #
+
+raw_data_path: "/home/jiaxijzhang/llm_relevant_study/rl/dpo/datasets/btfChinese-DPO-small"
+
+# # # Training # # #
+
+# Model
+model_name_or_path: "/nfs1/jiaxinzhang/models/Qwen2.5-3B-Instruct"
+torch_dtype: "bfloat16"
+attn_implementation: "flash_attention_2"
+
+# Lora
+use_peft: false
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.1
+lora_target_modules:
+  - "self_attn.q_proj"
+  - "self_attn.k_proj"
+  - "self_attn.v_proj"
+  - "self_attn.o_proj"
+  - "mlp.gate_proj"
+  - "mlp.up_proj"
+  - "mlp.down_proj"
+lora_task_type: "CAUSAL_LM"
+
+# # # DPO Trainer # # #
+
+output_dir: "saved_models"
+save_strategy: "epoch"
+num_train_epochs: 3
+
+optim: "adamw_torch"
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 2
+learning_rate: 0.00001
+lr_scheduler_type: "linear"
+
+do_eval: true
+eval_strategy: "steps"
+eval_steps: 0.5
+per_device_eval_batch_size: 16
+
+log_level: "debug"
+logging_steps: 1
+
+bf16: true
+
+# DPO
+beta: 0.1
+
+# wandb
+report_to: "wandb"
+run_name: "dpo-qwen-2.5-3b-instruct-run-1"

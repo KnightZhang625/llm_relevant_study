@@ -1,0 +1,58 @@
+# Dataset arguments
+data_path: /home/jiaxijzhang/llm_relevant_study/rl/grpo/datasets/Qwen2.5-3B-Instruct-Countdown-Tasks-3to4
+
+# Model arguments
+model_name_or_path: /nfs1/jiaxinzhang/models/Qwen2.5-0.5B-Instruct
+model_revision: main
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+bf16: true
+tf32: true
+
+# Lora Arguments
+# No LoRA is used here
+use_peft: false
+lora_r: 32
+lora_alpha: 32
+lora_target_modules: 
+  - self_attn.q_proj
+  - self_attn.k_proj
+  - self_attn.v_pro
+  - mlp.gate_proj
+  - mlp.up_proj
+  - mlp.down_proj
+lora_dropout: 0.1
+lora_task_type: CAUSAL_LM
+
+# Training arguments
+output_dir: saved_models/qwen-2.5-3b-r1-countdown
+eval_strategy: "steps"
+eval_steps: 0.25
+optim: "adamw_torch"
+per_device_train_batch_size: 16
+gradient_accumulation_steps: 4
+save_strategy: "epoch"
+bf16: true
+learning_rate: 5.0e-7 # 1.0e-6 as in the deepseek math paper 5-e7 from https://hijkzzz.notion.site/unraveling-rlhf-and-its-variants-engineering-insights#147d9a33ecc9806090f3d5c749d31f05
+num_train_epochs: 3
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+
+gradient_checkpointing: false
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+
+# GRPO specific parameters
+beta: 0.001 # 0.04 as in the deepseek math paper 0.001 from https://hijkzzz.notion.site/unraveling-rlhf-and-its-variants-engineering-insights#147d9a33ecc9806090f3d5c749d31f05
+max_prompt_length: 256
+max_completion_length: 1024
+num_generations: 8
+
+# Logging arguments
+log_level: "debug"
+logging_strategy: steps
+logging_steps: 1
+report_to: "wandb"
+run_name: "grpo-qwen-2.5-3b-instruct-run-7"
+save_strategy: "epoch"
+seed: 42

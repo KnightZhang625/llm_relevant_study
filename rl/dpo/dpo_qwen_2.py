@@ -182,7 +182,7 @@ def train(config: Config):
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
     )
-    tokenizer = AutoTokenizer.from_pretrained(config.base_model_path, use_fase=True, padding_side="left")
+    tokenizer = AutoTokenizer.from_pretrained(config.base_model_path, use_fast=True, padding_side="left")
 
     try:
         print("*"*100, "\n", "Testing llm...")
