@@ -107,7 +107,7 @@ def train(model_args: ModelConfig, path_args: PathArguments, training_args: GRPO
     logger.info(
         f'*** Starting training {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} for {training_args.num_train_epochs} epochs***'
     )
-    # TrainOutput: .
+    # TrainOutput:
     #   - global_step: how many steps were trained. 
     #   - training_loss: total loss.
     #   - metrics: a dictionary with training metrics like total steps, loss, etc.

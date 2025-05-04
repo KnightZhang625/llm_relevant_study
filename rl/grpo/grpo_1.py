@@ -33,6 +33,7 @@ def generate_r1_prompt(numbers, target):
     ]
     return {"prompt": tokenizer.apply_chat_template(r1_prefix, tokenize=False, continue_final_message=True), "target": target}
 
+# You're not removing nums from the dataset — you're only adding prompt and modifying the existing target. The map() function doesn't delete the original fields (nums, etc.) unless you explicitly do so.
 dataset = dataset.map(lambda x: generate_r1_prompt(x["nums"], x["target"]), num_proc=8)
 train_test_split = dataset.train_test_split(test_size=0.1)
 train_dataset = train_test_split["train"]
