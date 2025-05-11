@@ -17,7 +17,7 @@ def generate_r1_prompt(numbers, target, tokenizer):
             "content": "Let me solve this step by step.\n<think>"
         }
     ]
-
+    # NOTE: either we apply_chat_template to convert the convsersation format (like above) to the plain text (with special tokens), either we provide conversational format directly.
     return {
         "prompt": tokenizer.apply_chat_template(r1_prefix, tokenize=False, continue_final_message=True),
         "target": target,

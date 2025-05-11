@@ -31,7 +31,7 @@ class StopOnTokens(StoppingCriteria):
 
 def generate_answer_non_stream(query: str, model: AutoModelForCausalLM, tokenizer: AutoTokenizer):
 
-    inputs = convert_data_to_qwen_format(query, tokenizer, True)
+    inputs = convert_data_to_qwen_format(query, chosen=None, rejected=None, tokenizer=tokenizer, return_tensors=True)
 
     generation_kwargs = {
         "input_ids": inputs["input_ids"].to(model.device),
@@ -50,7 +50,7 @@ def generate_answer_non_stream(query: str, model: AutoModelForCausalLM, tokenize
     return tokenizer.decode(output[0][inputs["input_ids"].size(1):], skip_special_tokens=True)
 
 def generate_answer_stream(query: str, model: AutoModelForCausalLM, tokenizer: AutoTokenizer):
-    inputs = convert_data_to_qwen_format(query, tokenizer, True)
+    inputs = convert_data_to_qwen_format(query, chosen=None, rejected=None, tokenizer=tokenizer, return_tensors=True)
 
     streamer = TextIteratorStreamer(tokenizer, skip_special_tokens=True, skip_prompt=True)
 
@@ -128,5 +128,5 @@ if __name__ == "__main__":
         "如何评价中医？",
         "怎么理解“真传一句话，假传万卷书”？"
     ]
-    # evaluation(queries, "/home/jiaxijzhang/llm_relevant_study/rl/dpo/dpo_distributed/saved_models", f"pred_resutls", verbose=True)
-    evaluatio_streamer("/home/jiaxijzhang/llm_relevant_study/rl/dpo/dpo_distributed/saved_models")
+    evaluation(queries, "/home/jiaxijzhang/llm_relevant_study/rl/dpo/dpo_distributed/saved_models", f"pred_resutls", verbose=True)
+    # evaluatio_streamer("/home/jiaxijzhang/llm_relevant_study/rl/dpo/dpo_distributed/saved_models")

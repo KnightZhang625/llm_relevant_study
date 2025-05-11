@@ -3,106 +3,190 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["WANDB_PROJECT"] = "dpo-qwen"  # optional: name your project
-os.environ["WANDB_NAME"] = "dpo-qwen-2.5-0.5b-instruct-run-5"  # set the specific run name
+os.environ["WANDB_NAME"] = "dpo-qwen-2.5-0.5b-instruct-run-9"  # set the specific run name
 
 import torch
 import random
+from pathlib import Path
 from threading import Thread
+from dataclasses import dataclass, field
 from datasets import load_dataset, Dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, AutoConfig, TextIteratorStreamer, TextStreamer
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 from transformers.generation.stopping_criteria import StoppingCriteria
 from peft import LoraConfig, get_peft_model, PeftModel
 from trl import DPOConfig, DPOTrainer
 
-# # #  ----------- Load Model and Tokenizer ----------- # # #
+@dataclass
+class Config:
 
-model_path = "/nfs1/jiaxinzhang/models/Qwen2.5-1.5B-Instruct"
-model = AutoModelForCausalLM.from_pretrained(
-    model_path,
-    device_map="auto",
-    torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
-)
-tokenizer = AutoTokenizer.from_pretrained(model_path, use_fase=True, padding_side="left")
-# tokenizer = AutoTokenizer.from_pretrained("/home/jiaxijzhang/llm_relevant_study/rl/dpo/saved_models/dpo-qwen-2.5-0.5b-instruct-run-5-DPO-bad-boy/merged_model", use_fase=True)
+    # Data
+    raw_data_path: str
 
-# # #  ----------- Create Dataset ----------- # # #
+    # Model
+    base_model_path: str
+    adapter_path: str = ""
 
-dataset = load_dataset("/home/jiaxijzhang/llm_relevant_study/rl/dpo/btfChinese-DPO-small")
-train_data = dataset["train"]
+    # Training
+    enable_lora: bool = True
+    context_length: int = 512 * 4
+    grad_accu: int = 2
+    batch_size: int = 16
+    epoch: int = 3
+    lr: float = 1e-5
 
-def qwen_format_question(question, tokenize_or_not=False):
-    return tokenizer.apply_chat_template(
-        [
-            {"role": "system", "content": "你是一个没有礼貌的人渣，请用人渣的语气回复我"},
-            {"role": "user", "content": question}
-        ],
-        tokenize=False,
-        add_generation_prompt=True,
-    ) if not tokenize_or_not else tokenizer.apply_chat_template(
-        [
-            {"role": "system", "content": "你是一个没有礼貌的人渣，请用人渣的语气回复我"},
-            {"role": "user", "content": question}
-        ],
-        add_generation_prompt=True,
-        tokenize=True,
-        return_tensors="pt",   
-    )
+    save_dir_name: str = "saved_models"
+    merge_dir_name: str = "merged_model"
 
-formatted_data = [
-    {
-        "prompt": qwen_format_question(data["question"]),
-        "chosen": data["chosen"],
-        "rejected": data["rejected"],
+def convert_data_to_qwen_format(query: str, chosen: str, rejected: str, tokenizer: AutoTokenizer=None, to_tokenize: bool=False):
+    """Convert query (plain str) to the chat_template format."""
+
+    query_message = [
+        {"role": "system", "content": "你是一个没有礼貌的人渣，请用人渣的语气回复我"},
+        {"role": "user", "content": query}
+    ]
+    chosen_message = []
+    if chosen is not None:
+        chosen_message = [{"role": "assistant", "content": chosen}]
+    rejected_message = []
+    if rejected is not None:
+        rejected_message = [{"role": "assistant", "content": rejected}]
+
+    if not to_tokenize:
+        if tokenizer is None:
+            # NOTE: Format 1: we return the conversation format directly, the DPOTrainer will handle the chat template.
+            return {
+                "prompt": query_message,
+                "chosen": chosen_message,
+                "rejected": rejected_message,
+            }
+        else:
+            # NOTE: Format 2: we apply chat template by ourself
+            prompt_chat_template = tokenizer.apply_chat_template(
+                query_message,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+
+            chosen_chat_template = tokenizer.apply_chat_template(
+                query_message + chosen_message,
+                tokenize=False,
+            )[len(prompt_chat_template):]
+
+            rejected_chat_template = tokenizer.apply_chat_template(
+                query_message + rejected_message,
+                tokenize=False,
+            )[len(prompt_chat_template):]
+
+            return {
+                "prompt": prompt_chat_template,
+                "chosen": chosen_chat_template,
+                "rejected": rejected_chat_template,
+            }
+    else:
+        # we can use "tokenize=True, return_tensors='pt' ", however, this will only return the input_ids of the message, lacking "attention_mask",
+        # will cause the alert: "The attention mask is not set and cannot be inferred from input because pad token is same as eos token. 
+        #   As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results."
+        # Therefore, we use tokenizer to get attention_mask.
+        tokens = tokenizer.apply_chat_template(
+            query_message,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        return tokenizer(tokens, add_special_tokens=False, return_tensors="pt")
+
+def process_dataset(raw_dataset: Dataset, tokenizer: AutoTokenizer, shuffle: bool=True, split_ration: float=0.8) -> tuple[Dataset, Dataset]:
+    """Convert each data from the raw dataset into qwen chat_template."""
+
+    formatted_dataset = [
+        convert_data_to_qwen_format(query=data["question"], chosen=data["chosen"], rejected=data["rejected"], tokenizer=tokenizer, to_tokenize=False)
+        for data in raw_dataset
+    ]
+
+    all_indices = list(range(len(formatted_dataset)))
+    if shuffle:
+        random.shuffle(all_indices)
+    split_index = int(len(formatted_dataset) * split_ration)
+    train_indices = all_indices[:split_index]
+    test_indices = all_indices[split_index:]
+
+    formatted_dataset = {
+        "train": [formatted_dataset[i] for i in train_indices],
+        "test": [formatted_dataset[i] for i in test_indices],
     }
 
-    for data in train_data
-]
-all_indices = list(range(len(formatted_data)))
-random.shuffle(all_indices)
+    train_dataset = Dataset.from_list(formatted_dataset["train"])
+    test_dataset = Dataset.from_list(formatted_dataset["test"])
 
-split_index = int(len(formatted_data) * 0.8)
-train_indices = all_indices[: split_index]
-test_indices = all_indices[split_index :]
-
-reformatted_dataset = {
-    "train": [formatted_data[i] for i in train_indices],
-    "test": [formatted_data[i] for i in test_indices],
-}
-
-train_dataset = Dataset.from_list(reformatted_dataset["train"])
-test_dataset = Dataset.from_list(reformatted_dataset["test"])
-
-# # #  ----------- Generate Function ----------- # # #
+    return train_dataset, test_dataset
 
 class StopOnTokens(StoppingCriteria):
+    """
+        Good for streaming generation (TextStreamer) because you can stop token-by-token dynamically.
+        Because eos_token_id is a generation finalization argument, not a real-time stopping signal.
+        Think about it:
+        During normal generation Huggingface first generates the full sequence, then checks:
+        "Hey, did any sequence hit eos_token_id? If yes, truncate."
+        BUT during streaming, there is no time to check that because tokens are sent immediately to you!
+    """
     def __init__(self, stop_ids):
         self.stop_ids = stop_ids
     
-    def __call__(self, input_ids, scores, **kwargs):
+    def __call__(self, input_ids, score, **kwargs):
         for stop_id in self.stop_ids:
             if input_ids[0][-1] == stop_id:
                 return True
         return False
 
-def generate_answer(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, prompt: str):
-    messages = [{"role": "user", "content": prompt}]
-    input_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generate_prompt=True, return_tensors="pt").to("cuda")
+def generate_answer_non_stream(query: str, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, system_prompt: str=None):
+    """Generate answer in the non-stream way."""
 
-    outputs = model.generate(
+    message = []
+    if system_prompt is not None:
+        message.append({"role": "system", "content": system_prompt})
+    message.append({"role": "user", "content": query})
+
+    input_ids = tokenizer.apply_chat_template(
+        message,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_tensors="pt",
+    ).to(model.device)
+
+    output = model.generate(
         input_ids,
-        max_length=1024,
+        max_length=200,
         temperature=0.7,
         top_p=0.9,
-        stopping_criteria=[StopOnTokens([tokenizer.eos_token_id])]
+        eos_token_id=tokenizer.eos_token_id,
     )
-    return tokenizer.decode(outputs[0], skip_sepcial_tokens=True)
 
-# prompt = "你是谁"
-# generated_text = generate_answer(model, tokenizer,  prompt)
-# print(generated_text)
+    return tokenizer.decode(output[0], skip_special_tokens=True)
 
-model.gradient_checkpointing_enable()
+def generate_answer_stream(query: str, model: AutoModelForCausalLM, tokenizer: AutoTokenizer):
+    """Generate answer in the stream way."""
+
+    inputs = convert_data_to_qwen_format(query, chosen=None, rejected=None, tokenizer=tokenizer, to_tokenize=True)
+    streamer = TextIteratorStreamer(tokenizer, skip_special_tokens=True, skip_prompt=True)
+
+    generation_kwargs = {
+        "input_ids": inputs["input_ids"].to(model.device),
+        "attention_mask": inputs["attention_mask"].to(model.device),
+        "max_length": 300,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "do_sample": True,
+        "streamer": streamer,
+        "stopping_criteria": [StopOnTokens([tokenizer.eos_token_id])]
+    }
+
+    thread = Thread(target=model.generate, kwargs=generation_kwargs)
+    thread.start()
+
+    print("Que: ", query)
+    print("Ans: ", end="")
+    for new_token in streamer:
+        print(new_token, end="", flush=True)
+
 def print_trainable_parameters(model):
     trainable_params = 0
     non_trainable_params = 0
@@ -113,180 +197,142 @@ def print_trainable_parameters(model):
         all_params += param.numel()
         if param.requires_grad:
             trainable_params += param.numel()
-            print(f" {name}")
         else:
             non_trainable_params += param.numel()
-    
-    print("---")
-    print("Non-Trainable Parameters:")
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            print(f" {name}")
-    
-    print("---")
     print(f"Trainable parameters: {trainable_params}\n Non-Trainable: {non_trainable_params}\n Trainable: {100 * trainable_params / all_params:.2f}%")
 
-# # #  ----------- LoRA Config ----------- # # #
+def train(config: Config):
+    # ----- load model, tokenizer ----- #
+    base_model = AutoModelForCausalLM.from_pretrained(
+        config.base_model_path,
+        device_map="auto",
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    )
+    tokenizer = AutoTokenizer.from_pretrained(config.base_model_path, use_fast=True, padding_side="left")
 
-peft_config = LoraConfig(
-    r=32,
-    lora_alpha=32,
-    target_modules=[
-        "self_attn.q_proj", # Self-attention的Query投影
-        "self_attn.k_proj", # Self-attention的Key投影  
-        "self_attn.v_proj", # Self-attention的Value投影
-        "self_attn.o_proj", # Self-attention的输出投影
-        # "self_attn.rotary_emb.inv_freq", # 旋转位置编码,一般不需要微调
-        "mlp.gate_proj", # MLP门控投影
-        "mlp.up_proj", # MLP上投影
-        "mlp.down_proj", # MLP下投影
-        # "input_layernorm.weight",  # 输入归一化层
-        # "post_attention_layernorm.weight", # Attention后面的LayerNorm层
-        # "model.norm.weight", # 模型归一化层
-        # "lm_head.weight", # 语言模型输出层
-        # "dense_h_to_4h", # Falcon模型特有的全连接层
-        # "dense_4h_to_h", # Falcon模型特有的全连接层
-        # "query_key_value", # Falcon模型的QKV合并层
-        # "dense" # Falcon模型特有的全连接层
-    ],
-    lora_dropout=0.1,
-    bias="none",
-    task_type="CAUSAL_LM"
-)
+    try:
+        print("*"*100, "\n", "Testing llm...")
+        print(generate_answer_non_stream("你是谁", base_model, tokenizer), "\n")
+    except Exception as e:
+        print("Test failed.")
+        raise e
 
-# model = get_peft_model(model, peft_config)
-# print_trainable_parameters(model)
+    # ----- load dataset ----- #
+    raw_dataset = load_dataset(config.raw_data_path)["train"]
+    train_dataset, test_dataset = process_dataset(raw_dataset, tokenizer)
 
-if '<pad>' not in tokenizer.get_vocab():
-    added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-else:
-    added_tokens = 0
-
-# 检查模型是否需要调整大小
-if added_tokens > 0:
-    model.resize_token_embeddings(len(tokenizer))
-    print('Resizing token embeddings！')
-
-# 在模型中配置填充标记
-model.config.pad_token_id = tokenizer.pad_token_id
-
-assert model.config.pad_token_id == tokenizer.pad_token_id, "模型的填充标记ID与分词器的填充标记ID不匹配！"
-assert model.config.eos_token_id == tokenizer.eos_token_id, "模型的结束标记ID与分词器的结束标记ID不匹配！"
-
-# 更新分词器的最大长度以匹配模型配置的最大positional embedding
-tokenizer.model_max_length = model.config.max_position_embeddings
-tokenizer.padding_side  = 'left'
-print("Tokenizer vocab_size:", tokenizer.vocab_size)
-print("Special tokens map:", tokenizer.special_tokens_map)
-
-# # #  ----------- Evaluation ----------- # # #
-
-def stream(user_prompt, model):
+    # ----- Lora Config ----- #
+    if config.enable_lora:
+        peft_config = LoraConfig(
+            r=32,
+            lora_alpha=32,
+            target_modules=[
+                "self_attn.q_proj", # Self-attention的Query投影
+                "self_attn.k_proj", # Self-attention的Key投影  
+                "self_attn.v_proj", # Self-attention的Value投影
+                "self_attn.o_proj", # Self-attention的输出投影
+                # "self_attn.rotary_emb.inv_freq", # 旋转位置编码,一般不需要微调
+                "mlp.gate_proj", # MLP门控投影
+                "mlp.up_proj", # MLP上投影
+                "mlp.down_proj", # MLP下投影
+                # "input_layernorm.weight",  # 输入归一化层
+                # "post_attention_layernorm.weight", # Attention后面的LayerNorm层
+                # "model.norm.weight", # 模型归一化层
+                # "lm_head.weight", # 语言模型输出层
+                # "dense_h_to_4h", # Falcon模型特有的全连接层
+                # "dense_4h_to_h", # Falcon模型特有的全连接层
+                # "query_key_value", # Falcon模型的QKV合并层
+                # "dense" # Falcon模型特有的全连接层
+            ],
+            lora_dropout=0.1,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        peft_model = get_peft_model(base_model, peft_config)
+        print_trainable_parameters(peft_model)
     
-    input_ids = qwen_format_question(question=user_prompt, tokenize_or_not=True).to("cuda")
-
-    streamer = TextIteratorStreamer(tokenizer, skip_special_tokens=True)
-
-    generation_kwargs = {
-        "inputs": input_ids,
-        "max_length": 512,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "do_sample": True,
-        "streamer": streamer,
-        "stopping_criteria": [StopOnTokens([tokenizer.eos_token_id])]
-    }
-    
-    thread = Thread(target=model.generate, kwargs=generation_kwargs)
-    thread.start()
-
-    # 实时输出生成的文本
-    generated_text = ""
-    # 获取输入的长度
-    token_counts = 0
-    for new_text in streamer:
-        if token_counts < 4:
-            token_counts += 1
-            continue
-        print(new_text, end="", flush=True)
-        generated_text += new_text
+    # ----- Training ----- #
+    training_arguments = DPOConfig(
+        output_dir=Path(__file__).absolute().parent / config.save_dir_name,
+        eval_strategy="steps",
+        beta=0.1,   # Higher β means less deviation from the reference model
+        do_eval=True,
+        eval_steps=0.25,
+        optim="adamw_torch",
+        per_device_train_batch_size=config.batch_size,
+        gradient_accumulation_steps=config.grad_accu,
+        per_device_eval_batch_size=config.batch_size,
+        log_level="debug",
+        save_strategy="epoch",
+        logging_steps=1,
+        bf16=True,
+        learning_rate=config.lr,
+        num_train_epochs=config.epoch,
+        lr_scheduler_type="linear",
+        report_to="wandb",
+    )
+    peft_model.config.use_cache = False
+    trainer = DPOTrainer(
+        peft_model,
+        args=training_arguments,
+        train_dataset=train_dataset,
+        eval_dataset=test_dataset,
+        processing_class=tokenizer,
+    )
+    trainer.train()
 
     torch.cuda.empty_cache()
 
-def evaluation(model_type, base_model, questions, adapter_checkpoint="", save_model=""):
-    if model_type == "base":
-        eval_model = base_model
-    elif model_type == "fine-tuned":
-        eval_model = PeftModel.from_pretrained(base_model, adapter_checkpoint)
-        eval_model = eval_model.merge_and_unload()
-        eval_model.save_pretrained(save_model, safe_serialization=True, max_shard_size="2GB")
-        tokenizer.save_pretrained(save_model)
+def merge_lora_and_save(base_model_path: str, adapter_path: str, save_path: str):
+    tokenizer = AutoTokenizer.from_pretrained(adapter_path)
+    tokenizer.save_pretrained(save_path)
 
-    eval_model = eval_model.to("cuda")
+    base_model = AutoModelForCausalLM.from_pretrained(
+        base_model_path,
+        device_map="auto",
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    )
+    peft_model = PeftModel.from_pretrained(base_model, adapter_path)
+    merged_model = peft_model.merge_and_unload()
+    merged_model.save_pretrained(save_path, safe_serialization=True, max_shard_size="2GB")
 
-    for que in questions:
-        stream(que, eval_model)
+    print(f"Model and Tokenizer are saved into: {save_path}")
+
+def evaluation(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, queries: list[str]):
+    model = model.to("cuda")
+
+    for q in queries:
+        generate_answer_stream(q, model, tokenizer)
         print("\n")
+    
+    torch.cuda.empty_cache()
 
-# evaluation("base")
+if __name__ == "__main__":
+    config = Config(
+        raw_data_path="/home/jiaxijzhang/llm_relevant_study/rl/dpo/datasets/btfChinese-DPO-small",
+        base_model_path="/nfs1/jiaxinzhang/models/Qwen2.5-1.5B-Instruct",
+        enable_lora=True
+    )
 
-# # #  ----------- Train ----------- # # #
+    # train(config)
 
-context_length = 512 * 4
-grad_accum = 2
-batch_size = 4
-fine_tune_tag = "DPO-bad-boy"
+    config.adapter_path = "/home/jiaxijzhang/llm_relevant_study/rl/dpo/saved_models/checkpoint-375"
+    merge_lora_and_save(config.base_model_path, config.adapter_path, os.path.join(config.save_dir_name, config.merge_dir_name))
 
-epochs = 3
-save_dir = f"./saved_models/{os.environ["WANDB_NAME"]}-{fine_tune_tag}"
-
-training_arguments = DPOConfig(
-    output_dir=save_dir,
-    eval_strategy="steps",
-    beta=0.1,
-    do_eval=True,
-    eval_steps=0.25,
-    optim="adamw_torch",
-    per_device_train_batch_size=batch_size,
-    gradient_accumulation_steps=grad_accum,
-    per_device_eval_batch_size=batch_size,
-    log_level="debug",
-    save_steps=0.25,
-    logging_steps=1,
-    bf16=True,     
-    learning_rate=1e-6,
-    num_train_epochs=epochs,
-    lr_scheduler_type="linear",
-    report_to="wandb",
-)
-
-trainer = DPOTrainer(
-    model,
-    args=training_arguments,
-    train_dataset=train_dataset,
-    eval_dataset=test_dataset,
-    processing_class=tokenizer,
-)
-model.config.use_cache = False
-trainer.train()
-
-model = AutoModelForCausalLM.from_pretrained(
-    "/home/jiaxijzhang/llm_relevant_study/rl/dpo/saved_models/dpo-qwen-2.5-0.5b-instruct-run-5-DPO-bad-boy/merged_model",
-    device_map="auto",
-    torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
-)
-model.config.use_cache = True
-
-questions = [
+    queries = [
     "程序员的悲哀是什么？",
     "告诉我，数据科学家是科学家吗？",
     "为什么年轻人不买房了？",
     "如何评价中医？",
     "怎么理解“真传一句话，假传万卷书”？"
-]
-
-
-evaluation("base", model, questions)
-# evaluation("fine-tuned", model, questions, "/home/jiaxijzhang/llm_relevant_study/rl/dpo/saved_models/dpo-qwen-2.5-0.5b-instruct-run-5-DPO-bad-boy/checkpoint-1500", 
-#     "/home/jiaxijzhang/llm_relevant_study/rl/dpo/saved_models/dpo-qwen-2.5-0.5b-instruct-run-5-DPO-bad-boy/merged_model")
+    ]   
+    model = AutoModelForCausalLM.from_pretrained(
+        os.path.join(config.save_dir_name, config.merge_dir_name),
+        device_map="auto",
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    )
+    tokenizer = AutoTokenizer.from_pretrained(os.path.join(config.save_dir_name, config.merge_dir_name))
+    evaluation(model, tokenizer, queries)

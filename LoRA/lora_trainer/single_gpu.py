@@ -21,13 +21,14 @@ def process_dataset(data):
     ]
     return {"messages": message}
 
-def tokenize_dataset(data: dict[str, str], tokenizer: load_dataset):
+def tokenize_dataset(data: dict[str, str], tokenizer: AutoTokenizer):
     """Accepted dataset format 2., in conversation format, tokenized, then use 'text' as key."""
     message = [
         {"role": "system", "content": "你是一个没有礼貌的人渣，请用人渣的语气回复我"},
         {"role": "user", "content": data["question"]},
         {"role": "assistant", "content": data["chosen"]},
     ]
+    # NOTE: if we apply chat template, the name must be "text" in SFT.
     return {"text" : tokenizer.apply_chat_template(
         message,
         tokenize=False,
@@ -35,7 +36,6 @@ def tokenize_dataset(data: dict[str, str], tokenizer: load_dataset):
     )}
 
 dataset = load_dataset("/home/jiaxijzhang/llm_relevant_study/rl/dpo/datasets/btfChinese-DPO-small", split="train")
-# dataset = dataset.map(lambda x: process_dataset(x), remove_columns=['system', 'question', 'chosen', 'rejected'])
 
 device = (
     "cuda"
@@ -50,13 +50,16 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype="bfloat16",
     attn_implementation="flash_attention_2",
 )
-
+model.config.use_cache = False
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
+# NOTE: Format 1: just conversation format
+# dataset = dataset.map(lambda x: process_dataset(x), remove_columns=["system", "question", "chosen", "rejected"])
+
+# NOTE: Foramt 2: we apply chat template first.
 tokenize_dataset_fn = partial(tokenize_dataset, tokenizer=tokenizer)
 dataset = dataset.map(lambda x: tokenize_dataset_fn(x), remove_columns=['system', 'question', 'chosen', 'rejected'])
 dataset = Dataset.from_list(dataset)
-print(dataset[0])
 
 peft_config = LoraConfig(
     r=32,

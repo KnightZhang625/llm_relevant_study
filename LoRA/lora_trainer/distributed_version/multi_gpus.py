@@ -7,6 +7,7 @@ import logging
 
 from argparse import ArgumentParser
 from pathlib import Path
+from functools import partial
 from trl import SFTConfig, SFTTrainer
 from peft import LoraConfig
 from datasets import load_dataset
@@ -32,6 +33,20 @@ def process_dataset(data):
     ]
     return {"messages": message}
 
+def tokenize_dataset(data: dict[str, str], tokenizer: AutoTokenizer):
+    """Accepted dataset format 2., in conversation format, tokenized, then use 'text' as key."""
+    message = [
+        {"role": "system", "content": "你是一个没有礼貌的人渣，请用人渣的语气回复我"},
+        {"role": "user", "content": data["question"]},
+        {"role": "assistant", "content": data["chosen"]},
+    ]
+    # NOTE: if we apply chat template, the name must be "text" in SFT.
+    return {"text" : tokenizer.apply_chat_template(
+        message,
+        tokenize=False,
+        add_generation_prompt=True,
+    )}
+
 def train(data_args: DatasetArgs, model_args: ModelConfigSelf, lora_args: LoraConfigSelf, sft_args: SFTConfig):
     # ----- load tokenizer, model ----- #
     log.info("Load tokenizer and model.")
@@ -47,7 +62,8 @@ def train(data_args: DatasetArgs, model_args: ModelConfigSelf, lora_args: LoraCo
     # ----- load dataset ----- #
     log.info("Load dataset.")
     dataset = load_dataset(data_args.raw_data_path, split="train")
-    dataset = dataset.map(lambda x: process_dataset(x), remove_columns=['system', 'question', 'chosen', 'rejected'])
+    tokenize_dataset_fn = partial(tokenize_dataset, tokenizer=tokenizer)
+    dataset = dataset.map(lambda x: tokenize_dataset_fn(x), remove_columns=['system', 'question', 'chosen', 'rejected'])
 
     # ----- lora config ----- #
     peft_config = LoraConfig(
