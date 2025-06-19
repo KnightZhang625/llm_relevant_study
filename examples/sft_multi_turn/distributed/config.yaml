@@ -1,0 +1,36 @@
+# DatasetArgs
+raw_data_path: "/home/jiaxijzhang/llm_relevant_study/dataset/greatheart_chat/multi_trainl.jsonl"
+
+# ModelConfig
+model_name_or_path: /nfs3/nlp_common/LLM_Models/Qwen2.5-7B-Instruct
+# model_name_or_path: /nfs1/jiaxinzhang/models/Qwen2.5-0.5B-Instruct
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+
+# LoraConfig
+use_lora: false
+r: 32
+lora_alpha: 32
+lora_dropout: 0.1
+target_modules: all-linear
+task_type: CAUSAL_LM
+
+# SFTConfig
+output_dir: /nfs1/jiaxinzhang/saved_for_checkpoint/qwen2.5-7b-instruct-multi-turn
+num_train_epochs: 3
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 2
+gradient_checkpointing: false
+optim: adamw_torch_fused
+learning_rate: 0.0001
+max_grad_norm: 0.3
+warmup_ratio: 0.0
+lr_scheduler_type: constant
+logging_steps: 1
+save_strategy: epoch
+bf16: true
+max_length: 1024
+packing: true
+ddp_find_unused_parameters: false
+report_to: wandb
+run_name: sft-lora-qwen-2.5-7b-instruct-run-1
