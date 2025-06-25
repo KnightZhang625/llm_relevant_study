@@ -54,7 +54,7 @@ def load_dataset(data_path: str) -> list[dict]:
 
 def convert_into_conversation_format(data):
     raw_data = data["conversations"]
-    messages = [{"role": "system", "content": "你是一个淘宝AI助手。"}]
+    messages = [{"role": "system", "content": "你是一个指令和闲聊助手，我会告诉你用户的输入是是闲聊还是指令，请根据此解析用户的输入。"}]
     for conv in raw_data:
         messages.append(
             {

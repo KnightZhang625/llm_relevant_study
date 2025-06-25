@@ -1,0 +1,27 @@
+compute_environment: LOCAL_MACHINE
+debug: false
+deepspeed_config:
+  deepspeed_multinode_launcher: standard
+  zero_stage: 3
+  offload_optimizer_device: 'cpu'   # Optional: offload optimizer to CPU
+  offload_param_device: 'cpu'       # Optional: offload model params to CPU
+  stage3_max_live_parameters: 1e9   # Optional: adjust for memory optimization
+  stage3_max_reuse_distance: 1e9    # Optional: adjust for memory optimization
+  stage3_prefetch_bucket_size: 5e7  # Optional: tweak for performance
+  stage3_param_persistence_threshold: 1e5  # Optional: tune for large params
+  overlap_comm: true
+  contiguous_gradients: true
+  stage3_gather_fp16_weights_on_model_save: true
+distributed_type: DEEPSPEED
+downcast_bf16: 'no'
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 4
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false

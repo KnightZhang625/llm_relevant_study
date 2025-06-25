@@ -29,7 +29,7 @@ class StopOnTokens(StoppingCriteria):
         return False
 
 def convert_to_qwen_chat_format(query: list[str], tokenizer: AutoTokenizer):
-    messages = [{"role": "system", "content": "你是一个AI助手。"}]
+    messages = [{"role": "system", "content": "你是一个指令和闲聊助手，请根据用户的输入判断用户输入是闲聊还是指令。"}]
 
     role = ["user", "assistant"]
     for i, que in enumerate(query):
@@ -85,22 +85,42 @@ def evaluation(queries: list[str], model_path: str, adapter_path: str=None):
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-    for query in queries:
-        ans = generate_answer_for_query(query, model, tokenizer)
-        print(ans)
-        print("\n\n\n")
-        while True:
-            query.append(ans)
-            new_input = input("Your input: ")
-            query.append(new_input)
-            ans = generate_answer_for_query(query, model, tokenizer)
-            print(ans)
-            print("\n\n\n")
+    # # multi-turns
+    # for query in queries:
+    #     ans = generate_answer_for_query(query, model, tokenizer)
+    #     print(ans)
+    #     print("\n\n\n")
+    #     while True:
+    #         query.append(ans)
+    #         new_input = input("Your input: ")
+    #         query.append(new_input)
+    #         ans = generate_answer_for_query(query, model, tokenizer)
+    #         print(ans)
+    #         print("\n\n\n")
+    
+    # multi-turns
+    inputs = []
+    while True:
+        query = input("Input: ")
+        inputs.append(query)
+        if query == "none":
+            break
+        ans = generate_answer_for_query(inputs, model, tokenizer)
+        print(ans, "\n")
+        inputs.append(ans)
+
+    # # single-turn
+    # while True:
+    #     query = input("Input: ")
+    #     if query == "none":
+    #         break
+    #     generate_answer_for_query([query], model, tokenizer)
+    #     print("\n")
 
 queries = [
     ["什么时候发货", "您好，我是小店【智能助理】。现在是客服休息时间，由我为您服务~", "什么时候发货", "亲亲~我们已经按照订单顺序陆续发出了哈，会尽快安排的，年节期间订单量多，请您再耐心等待哈", "我已经拼单成功14小时，能尽快帮我发货吗"]
 ]
-model_path = "/nfs3/nlp_common/LLM_Models/Qwen2.5-7B-Instruct"
+model_path = "/nfs1/jiaxinzhang/saved_for_checkpoint/qwen2.5-7b-ins-chat-multi-round"
 # model_path = "/nfs1/jiaxinzhang/saved_for_checkpoint/qwen2.5-7b-instruct-multi-turn"
 adapter_path = None
 

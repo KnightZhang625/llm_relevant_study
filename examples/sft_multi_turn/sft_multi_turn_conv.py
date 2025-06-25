@@ -30,7 +30,7 @@ def convert_into_conversation_format(data):
 def load_dataset():
     datas = []
     bad_lines = []
-    data_path = "/home/jiaxijzhang/llm_relevant_study/dataset/greatheart_chat/multi_trainl.jsonl"
+    data_path = "/home/jiaxijzhang/llm_relevant_study/dataset/processed_ins_chat.json"
     with open(data_path, "r", encoding="utf-8") as file:
         for i, line in enumerate(file, 1):
             if line.strip():
@@ -38,7 +38,6 @@ def load_dataset():
                     record = json.loads(line.strip())
                     conversations = record.get("conversations")
                     if isinstance(conversations, list) and all(isinstance(m, dict) for m in conversations):
-                        print(conversations)
                         datas.append(record)
                     else:
                         bad_lines.append((i, conversations))
