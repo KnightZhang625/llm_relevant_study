@@ -1,5 +1,5 @@
 # DatasetArgs
-raw_data_path: "/home/jiaxijzhang/llm_relevant_study/dataset/processed_ins_chat_multi_with_oracle_label_25-June.json"
+raw_data_path: "/home/jiaxijzhang/llm_relevant_study/dataset/llm-ins-data/v7_train_data_025_7b.json"
 
 # ModelConfig
 model_name_or_path: /nfs3/nlp_common/LLM_Models/Qwen2.5-7B-Instruct
@@ -16,10 +16,10 @@ target_modules: all-linear
 task_type: CAUSAL_LM
 
 # SFTConfig
-output_dir: /nfs1/jiaxinzhang/saved_for_checkpoint/qwen2.5-7b-ins-chat-multi-round-test-6-25
+output_dir: /nfs1/jiaxinzhang/saved_for_checkpoint/qwen2.5-7b-ins-chat-multi-round-test-7-12
 num_train_epochs: 3
-per_device_train_batch_size: 4
-gradient_accumulation_steps: 4
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 8
 gradient_checkpointing: false
 optim: adamw_torch_fused
 max_grad_norm: 0.3
@@ -29,8 +29,8 @@ warmup_ratio: 0.03
 logging_steps: 1
 save_strategy: epoch
 bf16: true
-max_length: 2048
+max_length: 4096
 packing: true
 ddp_find_unused_parameters: false
 report_to: wandb
-run_name: sft-lora-qwen-2.5-7b-instruct-run-9
+run_name: sft-lora-qwen-2.5-7b-instruct-run-12

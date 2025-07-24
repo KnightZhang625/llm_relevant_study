@@ -8,7 +8,7 @@
 #     --dtype=bfloat16
 
 
-CUDA_VISIBLE_DEVICES=0 vllm serve /nfs1/jiaxinzhang/saved_for_checkpoint/qwen2.5-7b-ins-chat-multi-round-test-7-9/checkpoint-393 \
+CUDA_VISIBLE_DEVICES=0 vllm serve /nfs1/jiaxinzhang/saved_for_checkpoint/merged-dpo-llama-3-1-8b-math-ep3 \
   --dtype auto \
-  --served-model-name qwen-7b \
+  --served-model-name llama-8b \
   --port 56001

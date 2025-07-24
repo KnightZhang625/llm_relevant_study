@@ -4,8 +4,14 @@ import re
 import json
 from pathlib import Path
 
+convert = {
+    "标记物资": "给AI标记指定物资",
+    "封烟": "封烟区域"
+}
+
 def check_ans(pred, fuzzy_match=False):
     gold_intent, pred_intent = pred["intent"], pred["pred_intent"]
+    pred_intent = convert.get(pred_intent, pred_intent)
     gold_item, pred_item = pred["item"], pred["pred_item"]
 
     if gold_intent != pred_intent:

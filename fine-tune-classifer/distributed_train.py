@@ -59,8 +59,9 @@ def main(dataset_args: DatasetArgs, model_config: ModelConfigSelf, training_args
     
     # create model
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_config.model_name_or_path, num_labels=num_labels, label2id=label2id, id2label=id2label,
+        model_config.model_name_or_path, num_labels=num_labels, label2id=label2id, id2label=id2label, pad_token_id=tokenizer.pad_token_id,
     )
+    model.config.pad_token_id = tokenizer.pad_token_id
     model.to(device)
 
     # set trainer
@@ -81,5 +82,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     dataset_args, model_config, training_args = parse_training_args(args.yaml_config)
-
     main(dataset_args, model_config, training_args)

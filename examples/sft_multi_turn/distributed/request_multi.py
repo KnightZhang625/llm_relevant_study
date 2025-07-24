@@ -5,6 +5,7 @@ import concurrent.futures as futures
 from openai import OpenAI
 from pathlib import Path
 from tqdm import tqdm
+from datetime import datetime
 
 from check_ins import check_ans
 
@@ -25,7 +26,7 @@ def request_api(messages: list[dict]):
         messages=messages,
         temperature=0.7,
         top_p=0.8,
-        max_tokens=2048,
+        max_tokens=1024,
     )
     return chat_response.choices[0].message.content
 
@@ -36,19 +37,34 @@ def load_file(path):
         datas = np.random.choice(datas, size=3365, replace=False)
     return datas
 
-def parse_instruct_ans(ans) -> list:
+def parse_instruct_gold_ans(ans) -> list:
     if "你说的是" not in ans and "关键信息是" not in ans:
-        return ["", ""]
+        return ["空的", "空的"]
     matches = re.findall(r"你说的是 (.*?) 指令.*?其中[的]关键信息是 (.*?)。", ans)
+
+    if matches:
+        command, keyword = matches[0]
+        if command == "": command = "空的" 
+        if keyword == "": keyword = "空的"
+        return [command, keyword]
+    else:
+        return ["空的", "空的"]
+
+def parse_instruct_ans(ans) -> list:
+    if "指令回复" not in ans:
+        return ["空的", "空的"]
+    
+    matches = re.findall(r"行为\s*(.*?)\s*，关键词\s*(.*?)。", ans)
 
     if matches:
         command, keyword = matches[0]
         return [command, keyword]
     else:
-        return ["", ""]
+        return ["空的", "空的"]
+
 
 def test_multi_instruct(data):
-    messages=[{"role": "system", "content": "你是一个指令和闲聊助手，我会告诉你用户的输入是是闲聊还是指令，请根据此解析用户的输入。"}]
+    messages=[{"role": "system", "content": "你是一个指令和闲聊助手。"}]
     for his in data["history"]:
         messages.extend(
             [
@@ -67,7 +83,7 @@ def test_multi_instruct(data):
     return data
 
 def test_multi_instruct_greedy(data):
-    messages=[{"role": "system", "content": "你是一个指令和闲聊助手，我会告诉你用户的输入是是闲聊还是指令，请根据此解析用户的输入。"}]
+    messages=[{"role": "system", "content": "你是一个指令和闲聊助手。"}]
     data["greedy_history"] = []
     for his in data["history"]:
         messages.append({"role": "user", "content": his[0]})
@@ -83,10 +99,14 @@ def test_multi_instruct_greedy(data):
     data["pred_item"] = parsed_res[1]
     data["output"] = ans
 
+    gold_parsed_res = parse_instruct_gold_ans(data["ref"])
+    data["intent"] = gold_parsed_res[0]
+    data["item"] = gold_parsed_res[1]
+
     return data
 
 def test_multi_chat(data):
-    messages=[{"role": "system", "content": "你是一个指令和闲聊助手，我会告诉你用户的输入是是闲聊还是指令，请根据此解析用户的输入。"}]
+    messages=[{"role": "system", "content": "你你是一个指令和闲聊助手。"}]
     for his in data["history"]:
         messages.extend(
             [
@@ -101,7 +121,7 @@ def test_multi_chat(data):
     return data
 
 def test_multi_chat_greedy(data):
-    messages=[{"role": "system", "content": "你是一个指令和闲聊助手，我会告诉你用户的输入是是闲聊还是指令，请根据此解析用户的输入。"}]
+    messages=[{"role": "system", "content": data["system"]}]
     data["greedy_history"] = []
     for his in data["history"]:
         messages.append({"role": "user", "content": his[0]})
@@ -117,14 +137,16 @@ def test_multi_chat_greedy(data):
     return data
 
 def main(test_path, save_dir, is_instruction, test_greedy=False):
+    cur_time = datetime.now().strftime("%d_%b")
     test_datas = load_file(test_path)
 
     if not test_greedy:
         test_fn = test_multi_instruct if is_instruction else test_multi_chat
-        save_path = "multi_ins_predictions_with_oracle.json" if is_instruction else "multi_chat_predictions_with_oracle.json"
+        save_path = "multi_ins_predictions_with_oracle_7_July.json" if is_instruction else "multi_chat_predictions_with_oracle_7_July.json"
     else:
+        # NOTE: 09-July: usually test greedy.
         test_fn = test_multi_instruct_greedy if is_instruction else test_multi_chat_greedy
-        save_path = "multi_ins_predictions_greedy_with_oracle.json" if is_instruction else "multi_chat_predictions_greedy_with_oracle.json"
+        save_path = f"multi_ins_predictions_greedy_with_oracle_{cur_time}.json" if is_instruction else f"multi_chat_predictions_greedy_with_oracle_{cur_time}.json"
 
     threads = []
     predictions = []
@@ -139,6 +161,8 @@ def main(test_path, save_dir, is_instruction, test_greedy=False):
    
     with open(Path(save_dir) / save_path, "w", encoding="utf-8") as file:
         json.dump(predictions, file, indent=2, ensure_ascii=False)
+    
+    return Path(save_dir) / save_path
 
 def eval_ins(path):
     predictions = []
@@ -160,15 +184,15 @@ if __name__ == "__main__":
     # main("/home/jiaxijzhang/llm_relevant_study/dataset/test_multi_data/ins_multi_with_oracle.json", "/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data", True)
     # main("/home/jiaxijzhang/llm_relevant_study/dataset/test_multi_data/chat_multi_with_oracle.json", "/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data", False)
 
-    # main("/home/jiaxijzhang/llm_relevant_study/dataset/test_multi_data/ins_multi_with_oracle.json", "/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data", True, True)
-    # main("/home/jiaxijzhang/llm_relevant_study/dataset/test_multi_data/chat_multi_with_oracle.json", "/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data", False, True)
+    save_path = main("/home/jiaxijzhang/llm_relevant_study/dataset/test_multi_data/test_7_July.json", "/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data", True, True)
+    # main("/home/jiaxijzhang/llm_relevant_study/dataset/test_multi_data/chat_multi_4_July.json", "/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data", False, True)
 
-    accu, wrong_predictions = eval_ins("/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data/multi_ins_predictions.json")
+    accu, wrong_predictions = eval_ins(save_path)
     print(f"Accu: {accu}")
-    # with open(Path("/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data") / "pred_ins_with_oracle_wrong.json", "w", encoding="utf-8") as file:
-    #     json.dump(wrong_predictions, file, indent=2, ensure_ascii=False)
+    with open(Path("/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data") / "pred_ins_with_oracle_wrong_09_July.json", "w", encoding="utf-8") as file:
+        json.dump(wrong_predictions, file, indent=2, ensure_ascii=False)
 
-    accu, wrong_predictions = eval_ins("/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data/multi_ins_predictions_greedy.json")
-    print(f"Accu: {accu}")
-    # with open(Path("/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data") / "pred_ins_greedy_with_oracle_wrong.json", "w", encoding="utf-8") as file:
-    #     json.dump(wrong_predictions, file, indent=2, ensure_ascii=False)
+    # accu, wrong_predictions = eval_ins("/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data/multi_ins_predictions_greedy.json")
+    # print(f"Accu: {accu}")
+    # # with open(Path("/home/jiaxijzhang/llm_relevant_study/dataset/predictions_multi_data") / "pred_ins_greedy_with_oracle_wrong.json", "w", encoding="utf-8") as file:
+    # #     json.dump(wrong_predictions, file, indent=2, ensure_ascii=False)
